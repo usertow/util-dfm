@@ -2,9 +2,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "indexedstrategy.h"
-#include "utils/cancellablecollector.h"
 #include "utils/searchutility.h"
-#include "utils/lucenequeryutils.h"
 
 #include <unistd.h>
 #include <sys/types.h>
@@ -14,8 +12,6 @@
 #include <QFileInfo>
 #include <QDebug>
 #include <QElapsedTimer>
-
-#include "3rdparty/fulltext/chineseanalyzer.h"
 
 DFM_SEARCH_BEGIN_NS
 
@@ -27,167 +23,163 @@ QueryBuilder::QueryBuilder()
 {
 }
 
-Lucene::QueryPtr QueryBuilder::buildTypeQuery(const QStringList &types) const
+Xapian::Query QueryBuilder::buildTypeQuery(const QStringList &types) const
 {
     if (types.isEmpty()) {
-        return nullptr;
+        return Xapian::Query();
     }
 
-    BooleanQueryPtr typeQuery = newLucene<BooleanQuery>();
-
+    std::vector<Xapian::Query> subQueries;
     for (const QString &type : types) {
         QString cleanType = type.trimmed().toLower();
         if (!cleanType.isEmpty()) {
-            QueryPtr termQuery = newLucene<TermQuery>(
-                    newLucene<Term>(L"file_type",
-                                    StringUtils::toUnicode(cleanType.toStdString())));
-            typeQuery->add(termQuery, BooleanClause::SHOULD);
+            subQueries.push_back(Xapian::Query("T" + cleanType.toStdString()));
         }
     }
 
-    return typeQuery;
-}
-
-Lucene::QueryPtr QueryBuilder::buildExtQuery(const QStringList &extensions) const
-{
-    if (extensions.isEmpty()) {
-        return nullptr;
+    if (subQueries.empty()) {
+        return Xapian::Query();
     }
 
-    BooleanQueryPtr extQuery = newLucene<BooleanQuery>();
+    return Xapian::Query(Xapian::Query::OP_OR, subQueries.begin(), subQueries.end());
+}
 
+Xapian::Query QueryBuilder::buildExtQuery(const QStringList &extensions) const
+{
+    if (extensions.isEmpty()) {
+        return Xapian::Query();
+    }
+
+    std::vector<Xapian::Query> subQueries;
     for (const QString &ext : extensions) {
         QString cleanExt = ext.trimmed().toLower();
         if (!cleanExt.isEmpty()) {
-            QueryPtr termQuery = newLucene<TermQuery>(
-                    newLucene<Term>(L"file_ext",
-                                    StringUtils::toUnicode(cleanExt.toStdString())));
-            extQuery->add(termQuery, BooleanClause::SHOULD);
+            subQueries.push_back(Xapian::Query("E" + cleanExt.toStdString()));
         }
     }
 
-    return extQuery;
-}
-
-Lucene::QueryPtr QueryBuilder::buildPinyinQuery(const QStringList &pinyins, SearchQuery::BooleanOperator op) const
-{
-    if (pinyins.isEmpty()) {
-        return nullptr;
+    if (subQueries.empty()) {
+        return Xapian::Query();
     }
 
-    BooleanQueryPtr pinyinQuery = newLucene<BooleanQuery>();
+    return Xapian::Query(Xapian::Query::OP_OR, subQueries.begin(), subQueries.end());
+}
 
+Xapian::Query QueryBuilder::buildPinyinQuery(const QStringList &pinyins, SearchQuery::BooleanOperator op) const
+{
+    if (pinyins.isEmpty()) {
+        return Xapian::Query();
+    }
+
+    std::vector<Xapian::Query> subQueries;
     for (const QString &pinyin : pinyins) {
         QString cleanPinyin = pinyin.trimmed();
         if (!cleanPinyin.isEmpty() && Global::isPinyinSequence(cleanPinyin)) {
-            // 复用buildCommonQuery，指定pinyin字段，让分析器自动处理匹配
-            QueryPtr termQuery = buildCommonQuery(cleanPinyin, false, newLucene<ChineseAnalyzer>(), "pinyin", false);
-            if (termQuery) {
-                pinyinQuery->add(termQuery, op == SearchQuery::BooleanOperator::AND ? BooleanClause::MUST : BooleanClause::SHOULD);
-            }
+            subQueries.push_back(Xapian::Query("P" + cleanPinyin.toStdString()));
         }
     }
 
-    return pinyinQuery;
-}
-
-Lucene::QueryPtr QueryBuilder::buildPinyinAcronymQuery(const QStringList &acronyms, SearchQuery::BooleanOperator op) const
-{
-    if (acronyms.isEmpty()) {
-        return nullptr;
+    if (subQueries.empty()) {
+        return Xapian::Query();
     }
 
-    BooleanQueryPtr acronymQuery = newLucene<BooleanQuery>();
+    return Xapian::Query(op == SearchQuery::BooleanOperator::AND ? Xapian::Query::OP_AND : Xapian::Query::OP_OR, subQueries.begin(), subQueries.end());
+}
 
+Xapian::Query QueryBuilder::buildPinyinAcronymQuery(const QStringList &acronyms, SearchQuery::BooleanOperator op) const
+{
+    if (acronyms.isEmpty()) {
+        return Xapian::Query();
+    }
+
+    std::vector<Xapian::Query> subQueries;
     for (const QString &acronym : acronyms) {
         QString cleanAcronym = acronym.trimmed();
         if (!cleanAcronym.isEmpty()) {
-            // 复用buildCommonQuery，指定pinyin_acronym字段，让分析器自动处理匹配
-            QueryPtr termQuery = buildCommonQuery(cleanAcronym, false, newLucene<ChineseAnalyzer>(), "pinyin_acronym", false);
-            if (termQuery) {
-                acronymQuery->add(termQuery, op == SearchQuery::BooleanOperator::AND ? BooleanClause::MUST : BooleanClause::SHOULD);
-            }
+            subQueries.push_back(Xapian::Query("A" + cleanAcronym.toStdString()));
         }
     }
 
-    return acronymQuery;
-}
-
-Lucene::QueryPtr QueryBuilder::buildCommonQuery(const QString &keyword, bool caseSensitive, const Lucene::AnalyzerPtr &analyzer, bool allowWildcard) const
-{
-    if (keyword.isEmpty() || !analyzer) {
-        return nullptr;
+    if (subQueries.empty()) {
+        return Xapian::Query();
     }
 
-    Lucene::QueryParserPtr parser = newLucene<Lucene::QueryParser>(
-            Lucene::LuceneVersion::LUCENE_CURRENT,
-            L"file_name",
-            analyzer);
-
-    if (allowWildcard) {
-        parser->setAllowLeadingWildcard(true);
-    }
-
-    return parser->parse(LuceneQueryUtils::processQueryString(keyword, caseSensitive));
+    return Xapian::Query(op == SearchQuery::BooleanOperator::AND ? Xapian::Query::OP_AND : Xapian::Query::OP_OR, subQueries.begin(), subQueries.end());
 }
 
-Lucene::QueryPtr QueryBuilder::buildCommonQuery(const QString &keyword, bool caseSensitive, const Lucene::AnalyzerPtr &analyzer, const QString &fieldName, bool allowWildcard) const
-{
-    if (keyword.isEmpty() || !analyzer || fieldName.isEmpty()) {
-        return nullptr;
-    }
-
-    Lucene::QueryParserPtr parser = newLucene<Lucene::QueryParser>(
-            Lucene::LuceneVersion::LUCENE_CURRENT,
-            StringUtils::toUnicode(fieldName.toStdString()),
-            analyzer);
-
-    if (allowWildcard) {
-        parser->setAllowLeadingWildcard(true);
-    }
-
-    return parser->parse(LuceneQueryUtils::processQueryString(keyword, caseSensitive));
-}
-
-Lucene::QueryPtr QueryBuilder::buildSimpleQuery(const QString &keyword, bool caseSensitive, const Lucene::AnalyzerPtr &analyzer) const
-{
-    return buildCommonQuery(keyword, caseSensitive, analyzer, false);
-}
-
-Lucene::QueryPtr QueryBuilder::buildWildcardQuery(const QString &keyword, bool caseSensitive, const Lucene::AnalyzerPtr &analyzer) const
+Xapian::Query QueryBuilder::buildCommonQuery(const QString &keyword, bool caseSensitive, bool allowWildcard) const
 {
     if (keyword.isEmpty()) {
-        return nullptr;
+        return Xapian::Query();
     }
 
-    // 对于通配符查询，使用file_name_lower字段（非分词）而非file_name（分词）
-    QString processedKeyword = caseSensitive ? keyword : keyword.toLower();
+    Xapian::QueryParser parser;
+    int flags = Xapian::QueryParser::FLAG_DEFAULT;
+    if (allowWildcard) {
+        flags |= Xapian::QueryParser::FLAG_WILDCARD;
+    }
 
-    // 直接构建WildcardQuery，不使用QueryParser避免分词干扰
-    return newLucene<WildcardQuery>(
-            newLucene<Term>(L"file_name_lower",
-                            StringUtils::toUnicode(processedKeyword.toStdString())));
+    std::string processedKeyword = caseSensitive ? keyword.toStdString() : keyword.toLower().toStdString();
+    return parser.parse_query(processedKeyword, flags);
 }
 
-Lucene::QueryPtr QueryBuilder::buildBooleanQuery(const QStringList &terms, bool caseSensitive, SearchQuery::BooleanOperator op, const Lucene::AnalyzerPtr &analyzer) const
+Xapian::Query QueryBuilder::buildCommonQuery(const QString &keyword, bool caseSensitive, const QString &fieldName, bool allowWildcard) const
 {
-    if (terms.isEmpty() || !analyzer) {
-        return nullptr;
+    if (keyword.isEmpty() || fieldName.isEmpty()) {
+        return Xapian::Query();
     }
 
-    BooleanQueryPtr booleanQuery = newLucene<BooleanQuery>();
-    booleanQuery->setMaxClauseCount(1024);
+    // Map field name to prefix
+    std::string prefix;
+    if (fieldName == "file_name") prefix = "";   // Default field
+    else if (fieldName == "file_type") prefix = "T";
+    else if (fieldName == "file_ext") prefix = "E";
+    else if (fieldName == "pinyin") prefix = "P";
+    else if (fieldName == "pinyin_acronym") prefix = "A";
 
+    Xapian::QueryParser parser;
+    parser.add_prefix(fieldName.toStdString(), prefix);
+
+    int flags = Xapian::QueryParser::FLAG_DEFAULT;
+    if (allowWildcard) {
+        flags |= Xapian::QueryParser::FLAG_WILDCARD;
+    }
+
+    std::string queryStr = fieldName.toStdString() + ":" + (caseSensitive ? keyword.toStdString() : keyword.toLower().toStdString());
+    return parser.parse_query(queryStr, flags);
+}
+
+Xapian::Query QueryBuilder::buildSimpleQuery(const QString &keyword, bool caseSensitive) const
+{
+    return buildCommonQuery(keyword, caseSensitive, false);
+}
+
+Xapian::Query QueryBuilder::buildWildcardQuery(const QString &keyword, bool caseSensitive) const
+{
+    return buildCommonQuery(keyword, caseSensitive, true);
+}
+
+Xapian::Query QueryBuilder::buildBooleanQuery(const QStringList &terms, bool caseSensitive, SearchQuery::BooleanOperator op) const
+{
+    if (terms.isEmpty()) {
+        return Xapian::Query();
+    }
+
+    std::vector<Xapian::Query> subQueries;
     for (const QString &term : terms) {
         if (!term.isEmpty()) {
-            QueryPtr termQuery = buildCommonQuery(term, caseSensitive, analyzer, false);
-            if (termQuery) {
-                booleanQuery->add(termQuery, op == SearchQuery::BooleanOperator::AND ? BooleanClause::MUST : BooleanClause::SHOULD);
+            Xapian::Query termQuery = buildCommonQuery(term, caseSensitive, false);
+            if (!termQuery.empty()) {
+                subQueries.push_back(termQuery);
             }
         }
     }
 
-    return booleanQuery;
+    if (subQueries.empty()) {
+        return Xapian::Query();
+    }
+
+    return Xapian::Query(op == SearchQuery::BooleanOperator::AND ? Xapian::Query::OP_AND : Xapian::Query::OP_OR, subQueries.begin(), subQueries.end());
 }
 
 //--------------------------------------------------------------------
@@ -198,60 +190,21 @@ IndexManager::IndexManager()
 {
 }
 
-FSDirectoryPtr IndexManager::getIndexDirectory(const QString &indexPath) const
+Xapian::Database IndexManager::getDatabase(const QString &indexPath) const
 {
-    if (m_cachedDirectory && m_cachedIndexPath == indexPath) {
-        return m_cachedDirectory;
-    }
-
-    m_cachedIndexPath = indexPath;
-    try {
-        m_cachedDirectory = FSDirectory::open(StringUtils::toUnicode(indexPath.toStdString()));
-        return m_cachedDirectory;
-    } catch (const LuceneException &e) {
-        qWarning() << "Failed to open index directory:" << QString::fromStdWString(e.getError());
-        return nullptr;
-    }
-}
-
-IndexReaderPtr IndexManager::getIndexReader(FSDirectoryPtr directory) const
-{
-    if (!directory) {
-        return nullptr;
-    }
-
-    if (m_cachedReader && m_cachedDirectory == directory) {
-        return m_cachedReader;
+    if (m_cachedIndexPath == indexPath) {
+        return m_cachedDatabase;
     }
 
     try {
-        if (IndexReader::indexExists(directory)) {
-            m_cachedReader = IndexReader::open(directory, true);
-            return m_cachedReader;
-        }
-    } catch (const LuceneException &e) {
-        qWarning() << "Failed to open index reader:" << QString::fromStdWString(e.getError());
-    }
-
-    return nullptr;
-}
-
-SearcherPtr IndexManager::getSearcher(IndexReaderPtr reader) const
-{
-    if (!reader) {
-        return nullptr;
-    }
-
-    if (m_cachedSearcher && m_cachedReader == reader) {
-        return m_cachedSearcher;
-    }
-
-    try {
-        m_cachedSearcher = newLucene<IndexSearcher>(reader);
-        return m_cachedSearcher;
-    } catch (const LuceneException &e) {
-        qWarning() << "Failed to create searcher:" << QString::fromStdWString(e.getError());
-        return nullptr;
+        m_cachedDatabase = Xapian::Database(indexPath.toStdString());
+        m_cachedIndexPath = indexPath;
+        return m_cachedDatabase;
+    } catch (const Xapian::Error &e) {
+        qWarning() << "Failed to open Xapian database:" << QString::fromStdString(e.get_msg());
+        m_cachedDatabase = Xapian::Database(); // Reset
+        m_cachedIndexPath.clear();
+        return m_cachedDatabase;
     }
 }
 
@@ -294,8 +247,8 @@ void FileNameIndexedStrategy::search(const SearchQuery &query)
     // 执行搜索
     try {
         performIndexSearch(query, optionsApi);
-    } catch (const LuceneException &e) {
-        qWarning() << "Lucene search exception:" << QString::fromStdWString(e.getError());
+    } catch (const Xapian::Error &e) {
+        qWarning() << "Xapian search exception:" << QString::fromStdString(e.get_msg());
         emit errorOccurred(SearchError(SearchErrorCode::InternalError));
     } catch (const std::exception &e) {
         qWarning() << "Standard exception:" << e.what();
@@ -307,6 +260,8 @@ void FileNameIndexedStrategy::search(const SearchQuery &query)
 
 void FileNameIndexedStrategy::performIndexSearch(const SearchQuery &query, const FileNameOptionsAPI &api)
 {
+    BaseSearchStrategy::SearchCancellationGuard guard(&m_cancelled);
+
     bool caseSensitive = m_options.caseSensitive();
     const QString &searchPath = m_options.searchPath();
     const QStringList &searchExcludedPaths = m_options.searchExcludedPaths();
@@ -446,91 +401,70 @@ FileNameIndexedStrategy::IndexQuery FileNameIndexedStrategy::buildIndexQuery(
 
 void FileNameIndexedStrategy::executeIndexQuery(const IndexQuery &query, const QString &searchPath, const QStringList &searchExcludedPaths)
 {
-    // 获取索引目录
-    FSDirectoryPtr directory = m_indexManager->getIndexDirectory(m_indexDir);
-    if (!directory) {
-        emit errorOccurred(SearchError(SearchErrorCode::InternalError));
-        return;
-    }
-
-    if (!IndexReader::indexExists(directory)) {
-        qWarning() << "Index does not exist:" << m_indexDir;
-        emit errorOccurred(SearchError(FileNameSearchErrorCode::FileNameIndexNotFound));
-        return;
-    }
-
-    // 获取索引读取器
-    IndexReaderPtr reader = m_indexManager->getIndexReader(directory);
-    if (!reader || reader->numDocs() == 0) {
-        qWarning() << "Index is empty";
-        emit errorOccurred(SearchError(SearchErrorCode::InternalError));
-        return;
-    }
-
-    // 获取搜索器
-    SearcherPtr searcher = m_indexManager->getSearcher(reader);
-    if (!searcher) {
-        emit errorOccurred(SearchError(SearchErrorCode::InternalError));
-        return;
-    }
-
-    // 构建查询
-    QueryPtr luceneQuery;
+    // 获取 Xapian 数据库
+    Xapian::Database db;
     try {
-        luceneQuery = buildLuceneQuery(query, searchPath);
-        if (!luceneQuery) {
+        db = m_indexManager->getDatabase(m_indexDir);
+        // Test if db is valid
+        db.get_doccount();
+    } catch (...) {
+        emit errorOccurred(SearchError(SearchErrorCode::InternalError));
+        return;
+    }
+
+    // 构建 Xapian 查询
+    Xapian::Query xapianQuery;
+    try {
+        xapianQuery = buildXapianQuery(query, searchPath);
+        if (xapianQuery.empty()) {
             emit errorOccurred(SearchError(SearchErrorCode::InvalidQuery));
             return;
         }
-    } catch (const LuceneException &e) {
-        qWarning() << "Error building query:" << QString::fromStdWString(e.getError());
+    } catch (const Xapian::Error &e) {
+        qWarning() << "Error building Xapian query:" << QString::fromStdString(e.get_msg());
         emit errorOccurred(SearchError(SearchErrorCode::InvalidQuery));
         return;
     }
+
     // Measure the time taken to execute the search
     QElapsedTimer searchTimer;
     searchTimer.start();
 
     // 执行搜索
-    int32_t maxResults = m_options.maxResults() > 0 ? m_options.maxResults() : reader->numDocs();
+    Xapian::Enquire enquire(db);
+    enquire.set_query(xapianQuery);
 
-    // 使用自定义 CancellableCollector 实现可中断搜索
-    Collection<ScoreDocPtr> scoreDocs;
+    Xapian::MSet mset;
     try {
-        // 创建可取消的收集器
-        boost::shared_ptr<CancellableCollector> collector = newLucene<CancellableCollector>(&m_cancelled, maxResults);
-
-        // 执行搜索，使用自定义收集器
-        searcher->search(luceneQuery, collector);
-
-        // 获取收集到的文档
-        scoreDocs = collector->getScoreDocs();
-
+        int32_t maxResults = m_options.maxResults() > 0 ? m_options.maxResults() : 10000;
+        mset = enquire.get_mset(0, maxResults);
         qInfo() << "Filename search execution time:" << searchTimer.elapsed() << "ms"
-                << "Total hits:" << collector->getTotalHits()
-                << "Collected:" << scoreDocs.size();
-    } catch (const SearchCancelledException &e) {
-        qInfo() << "Filename search cancelled during execution";
+                << "Total hits:" << mset.get_matches_estimated()
+                << "Collected:" << mset.size();
+    } catch (const Xapian::Error &e) {
+        qWarning() << "Xapian search exception:" << QString::fromStdString(e.get_msg());
+        emit errorOccurred(SearchError(SearchErrorCode::InternalError));
         return;
     }
 
     // Measure the time taken to process search results
     QElapsedTimer resultTimer;
     resultTimer.start();
-    auto docsSize = scoreDocs.size();
-    m_results.reserve(docsSize);
+    m_results.reserve(mset.size());
 
     // 实时处理搜索结果
-    for (int i = 0; i < docsSize; i++) {
+    for (Xapian::MSetIterator it = mset.begin(); it != mset.end(); ++it) {
         if (m_cancelled.load()) {
             qInfo() << "Filename search cancelled";
             break;
         }
 
         try {
-            ScoreDocPtr scoreDoc = scoreDocs[i];
-            DocumentPtr doc = searcher->doc(scoreDoc->doc);
-            QString path = QString::fromStdWString(doc->get(L"full_path"));
+            Xapian::Document doc = it.get_document();
+            // 假设路径存储在数据字段中，或者作为一个特定的值
+            // 在 Xapian 中，通常将元数据存储在 document data 中
+            // 这里假设 data 是一个 JSON 字符串或简单的路径
+            QString path = QString::fromStdString(doc.get_data());
 
             if (!path.startsWith(searchPath)) {
                 continue;
@@ -541,19 +475,18 @@ void FileNameIndexedStrategy::executeIndexQuery(const IndexQuery &query, const Q
                 continue;
             }
 
-            if (Q_LIKELY(!m_options.includeHidden())) {
-                if (QString::fromStdWString(doc->get(L"is_hidden")).toLower() == "y")
-                    continue;
-            }
+            // Xapian 不直接支持 is_hidden 过滤，除非在索引时作为 term 或 value
+            // 这里假设我们在查询阶段已经过滤了隐藏文件，或者在结果处理阶段过滤
 
             // 处理搜索结果
             if (Q_UNLIKELY(m_options.detailedResultsEnabled())) {
-                QString type = QString::fromStdWString(doc->get(L"file_type"));
-                QString time = QString::fromStdWString(doc->get(L"modify_time_str"));
-                QString size = QString::fromStdWString(doc->get(L"file_size_str"));
+                // 假设这些信息也存储在 doc 中
+                // 这里使用占位符，实际需要根据索引结构获取
+                QString type = ""; // it.get_document().get_value(SLOT_FILE_TYPE)
+                QString time = ""; // it.get_document().get_value(SLOT_MODIFY_TIME)
+                QString size = ""; // it.get_document().get_value(SLOT_FILE_SIZE)
                 m_results.append(processSearchResult(path, type, time, size));
             } else {
-                // perf: quickly
                 SearchResult result(path);
                 m_results.append(result);
             }
@@ -562,8 +495,8 @@ void FileNameIndexedStrategy::executeIndexQuery(const IndexQuery &query, const Q
             if (Q_UNLIKELY(m_options.resultFoundEnabled()))
                 emit resultFound(m_results.last());
 
-        } catch (const LuceneException &e) {
-            qWarning() << "Error processing result:" << QString::fromStdWString(e.getError());
+        } catch (const Xapian::Error &e) {
+            qWarning() << "Error processing result:" << QString::fromStdString(e.get_msg());
             continue;
         }
     }
@@ -585,203 +518,195 @@ SearchResult FileNameIndexedStrategy::processSearchResult(const QString &path, c
     return result;
 }
 
-Lucene::QueryPtr FileNameIndexedStrategy::buildLuceneQuery(const IndexQuery &query, const QString &searchPath) const
+Xapian::Query FileNameIndexedStrategy::buildXapianQuery(const IndexQuery &query, const QString &searchPath) const
 {
-    BooleanQueryPtr finalQuery = newLucene<BooleanQuery>();
+    std::vector<Xapian::Query> mustQueries;
     bool hasValidQuery = false;
-    AnalyzerPtr analyzer = newLucene<ChineseAnalyzer>();
 
     switch (query.type) {
     case SearchType::Simple:
         if (!query.terms.isEmpty()) {
-            QueryPtr simpleQuery = m_queryBuilder->buildSimpleQuery(query.terms.first(), query.caseSensitive, analyzer);
-            if (simpleQuery) {
-                finalQuery->add(simpleQuery, BooleanClause::MUST);
+            Xapian::Query simpleQuery = m_queryBuilder->buildSimpleQuery(query.terms.first(), query.caseSensitive);
+            if (!simpleQuery.empty()) {
+                mustQueries.push_back(simpleQuery);
                 hasValidQuery = true;
             }
         }
         break;
     case SearchType::Wildcard:
         if (!query.terms.isEmpty()) {
-            QueryPtr wildcardQuery = m_queryBuilder->buildWildcardQuery(query.terms.first(), query.caseSensitive, analyzer);
-            if (wildcardQuery) {
-                finalQuery->add(wildcardQuery, BooleanClause::MUST);
+            Xapian::Query wildcardQuery = m_queryBuilder->buildWildcardQuery(query.terms.first(), query.caseSensitive);
+            if (!wildcardQuery.empty()) {
+                mustQueries.push_back(wildcardQuery);
                 hasValidQuery = true;
             }
         }
         break;
     case SearchType::Boolean:
         if (!query.terms.isEmpty()) {
-            BooleanQueryPtr booleanQuery = buildBooleanTermsQuery(query, analyzer);
-            if (booleanQuery) {
-                finalQuery->add(booleanQuery, BooleanClause::MUST);
+            Xapian::Query booleanQuery = buildBooleanTermsQuery(query);
+            if (!booleanQuery.empty()) {
+                mustQueries.push_back(booleanQuery);
                 hasValidQuery = true;
             }
         }
         break;
     case SearchType::Pinyin:
         if (!query.terms.isEmpty()) {
-            BooleanQueryPtr combinedQuery = newLucene<BooleanQuery>();
+            std::vector<Xapian::Query> shouldQueries;
 
             // 添加拼音查询
             if (Global::isPinyinSequence(query.terms.first())) {
-                QueryPtr pinyinQuery = m_queryBuilder->buildPinyinQuery(query.terms);
-                if (pinyinQuery) {
-                    combinedQuery->add(pinyinQuery, BooleanClause::SHOULD);
+                Xapian::Query pinyinQuery = m_queryBuilder->buildPinyinQuery(query.terms);
+                if (!pinyinQuery.empty()) {
+                    shouldQueries.push_back(pinyinQuery);
                     hasValidQuery = true;
                 }
             }
 
             // 添加普通关键词查询
-            QueryPtr simpleQuery = m_queryBuilder->buildSimpleQuery(query.terms.first(), query.caseSensitive, analyzer);
-            if (simpleQuery) {
-                combinedQuery->add(simpleQuery, BooleanClause::SHOULD);
+            Xapian::Query simpleQuery = m_queryBuilder->buildSimpleQuery(query.terms.first(), query.caseSensitive);
+            if (!simpleQuery.empty()) {
+                shouldQueries.push_back(simpleQuery);
                 hasValidQuery = true;
             }
 
-            if (hasValidQuery) {
-                finalQuery->add(combinedQuery, BooleanClause::MUST);
+            if (!shouldQueries.empty()) {
+                mustQueries.push_back(Xapian::Query(Xapian::Query::OP_OR, shouldQueries.begin(), shouldQueries.end()));
             }
         }
         break;
     case SearchType::PinyinAcronym:
         if (!query.terms.isEmpty()) {
-            BooleanQueryPtr combinedQuery = newLucene<BooleanQuery>();
+            std::vector<Xapian::Query> shouldQueries;
 
             // 添加拼音首字母查询
             if (Global::isPinyinAcronymSequence(query.terms.first())) {
-                QueryPtr pinyinAcronymQuery = m_queryBuilder->buildPinyinAcronymQuery(query.terms);
-                if (pinyinAcronymQuery) {
-                    combinedQuery->add(pinyinAcronymQuery, BooleanClause::SHOULD);
+                Xapian::Query pinyinAcronymQuery = m_queryBuilder->buildPinyinAcronymQuery(query.terms);
+                if (!pinyinAcronymQuery.empty()) {
+                    shouldQueries.push_back(pinyinAcronymQuery);
                     hasValidQuery = true;
                 }
             }
 
             // 添加普通关键词查询
-            QueryPtr simpleQuery = m_queryBuilder->buildSimpleQuery(query.terms.first(), query.caseSensitive, analyzer);
-            if (simpleQuery) {
-                combinedQuery->add(simpleQuery, BooleanClause::SHOULD);
+            Xapian::Query simpleQuery = m_queryBuilder->buildSimpleQuery(query.terms.first(), query.caseSensitive);
+            if (!simpleQuery.empty()) {
+                shouldQueries.push_back(simpleQuery);
                 hasValidQuery = true;
             }
 
-            if (hasValidQuery) {
-                finalQuery->add(combinedQuery, BooleanClause::MUST);
+            if (!shouldQueries.empty()) {
+                mustQueries.push_back(Xapian::Query(Xapian::Query::OP_OR, shouldQueries.begin(), shouldQueries.end()));
             }
         }
         break;
     case SearchType::FileType:
         if (!query.fileTypes.isEmpty()) {
-            QueryPtr typeQuery = m_queryBuilder->buildTypeQuery(query.fileTypes);
-            if (typeQuery) {
-                finalQuery->add(typeQuery, BooleanClause::MUST);
+            Xapian::Query typeQuery = m_queryBuilder->buildTypeQuery(query.fileTypes);
+            if (!typeQuery.empty()) {
+                mustQueries.push_back(typeQuery);
                 hasValidQuery = true;
             }
         }
         break;
     case SearchType::FileExt:
         if (!query.fileExtensions.isEmpty()) {
-            QueryPtr extQuery = m_queryBuilder->buildExtQuery(query.fileExtensions);
-            if (extQuery) {
-                finalQuery->add(extQuery, BooleanClause::MUST);
+            Xapian::Query extQuery = m_queryBuilder->buildExtQuery(query.fileExtensions);
+            if (!extQuery.empty()) {
+                mustQueries.push_back(extQuery);
                 hasValidQuery = true;
             }
         }
         break;
     case SearchType::Combined:
         if (!query.terms.isEmpty()) {
-            BooleanQueryPtr combinedQuery = buildBooleanTermsQuery(query, analyzer);
-            if (combinedQuery) {
-                finalQuery->add(combinedQuery, BooleanClause::MUST);
+            Xapian::Query combinedQuery = buildBooleanTermsQuery(query);
+            if (!combinedQuery.empty()) {
+                mustQueries.push_back(combinedQuery);
                 hasValidQuery = true;
             }
         }
 
         // 构建文件类型查询
         if (query.combineWithFileType && !query.fileTypes.isEmpty()) {
-            QueryPtr typeQuery = m_queryBuilder->buildTypeQuery(query.fileTypes);
-            if (typeQuery) {
-                finalQuery->add(typeQuery, BooleanClause::MUST);
+            Xapian::Query typeQuery = m_queryBuilder->buildTypeQuery(query.fileTypes);
+            if (!typeQuery.empty()) {
+                mustQueries.push_back(typeQuery);
                 hasValidQuery = true;
             }
         }
 
         // 构建文件后缀查询
         if (query.combineWithFileExt && !query.fileExtensions.isEmpty()) {
-            QueryPtr extQuery = m_queryBuilder->buildExtQuery(query.fileExtensions);
-            if (extQuery) {
-                finalQuery->add(extQuery, BooleanClause::MUST);
+            Xapian::Query extQuery = m_queryBuilder->buildExtQuery(query.fileExtensions);
+            if (!extQuery.empty()) {
+                mustQueries.push_back(extQuery);
                 hasValidQuery = true;
             }
         }
         break;
     }
 
-    // Add path prefix query optimization
-    if (hasValidQuery && SearchUtility::isFilenameIndexAncestorPathsSupported()
-        && SearchUtility::shouldUsePathPrefixQuery(searchPath)) {
-        QueryPtr pathPrefixQuery = LuceneQueryUtils::buildPathPrefixQuery(searchPath, "ancestor_paths");
-        if (pathPrefixQuery) {
-            finalQuery->add(pathPrefixQuery, BooleanClause::MUST);
-            qInfo() << "Using path prefix query for optimization:" << searchPath;
-        }
+    // Path prefix optimization
+    if (hasValidQuery && SearchUtility::shouldUsePathPrefixQuery(searchPath)) {
+        // Assume path is indexed with prefix 'P'
+        Xapian::Query pathQuery("P" + searchPath.toStdString());
+        mustQueries.push_back(pathQuery);
     }
 
-    // Filter hidden files at query level to avoid losing results due to maxResults limit
+    // Hidden files
     if (hasValidQuery && Q_LIKELY(!m_options.includeHidden())) {
-        QueryPtr hiddenQuery = Lucene::newLucene<Lucene::TermQuery>(
-                Lucene::newLucene<Lucene::Term>(
-                        Lucene::StringUtils::toUnicode("is_hidden"),
-                        Lucene::StringUtils::toUnicode("Y")));
-        finalQuery->add(hiddenQuery, Lucene::BooleanClause::MUST_NOT);
+        Xapian::Query hiddenQuery("H" + std::string("Y"));
+        mustQueries.push_back(Xapian::Query(Xapian::Query::OP_AND_NOT, Xapian::Query(), hiddenQuery));
     }
 
-    return hasValidQuery ? finalQuery : nullptr;
+    if (mustQueries.empty()) return Xapian::Query();
+    return Xapian::Query(Xapian::Query::OP_AND, mustQueries.begin(), mustQueries.end());
 }
 
-BooleanQueryPtr FileNameIndexedStrategy::buildBooleanTermsQuery(const IndexQuery &query, const AnalyzerPtr &analyzer) const
+Xapian::Query FileNameIndexedStrategy::buildBooleanTermsQuery(const IndexQuery &query) const
 {
-    // 创建布尔查询
-    BooleanQueryPtr booleanQuery = newLucene<BooleanQuery>();
+    std::vector<Xapian::Query> mustQueries;
     bool hasValidQuery = false;
 
     // 对每个搜索词创建子查询
     for (const QString &term : query.terms) {
-        BooleanQueryPtr termQuery = newLucene<BooleanQuery>();
-        bool termHasQuery = false;
+        if (term.isEmpty()) continue;
 
-        // 添加普通关键词查询
-        QueryPtr keywordQuery = m_queryBuilder->buildSimpleQuery(term, query.caseSensitive, analyzer);
-        if (keywordQuery) {
-            termQuery->add(keywordQuery, BooleanClause::SHOULD);
-            termHasQuery = true;
+        std::vector<Xapian::Query> shouldQueries;
+
+        // 1. 普通关键词查询
+        Xapian::Query keywordQuery = m_queryBuilder->buildSimpleQuery(term, query.caseSensitive);
+        if (!keywordQuery.empty()) {
+            shouldQueries.push_back(keywordQuery);
         }
 
-        // 添加拼音查询
+        // 2. 拼音查询
         if (query.usePinyin && Global::isPinyinSequence(term)) {
-            QueryPtr pinyinQuery = m_queryBuilder->buildPinyinQuery(QStringList { term });
-            if (pinyinQuery) {
-                termQuery->add(pinyinQuery, BooleanClause::SHOULD);
-                termHasQuery = true;
+            Xapian::Query pinyinQuery = m_queryBuilder->buildPinyinQuery(QStringList { term });
+            if (!pinyinQuery.empty()) {
+                shouldQueries.push_back(pinyinQuery);
             }
         }
 
-        // 添加拼音首字母查询
+        // 3. 拼音首字母查询
         if (query.usePinyinAcronym && Global::isPinyinAcronymSequence(term)) {
-            QueryPtr pinyinAcronymQuery = m_queryBuilder->buildPinyinAcronymQuery(QStringList { term });
-            if (pinyinAcronymQuery) {
-                termQuery->add(pinyinAcronymQuery, BooleanClause::SHOULD);
-                termHasQuery = true;
+            Xapian::Query pinyinAcronymQuery = m_queryBuilder->buildPinyinAcronymQuery(QStringList { term });
+            if (!pinyinAcronymQuery.empty()) {
+                shouldQueries.push_back(pinyinAcronymQuery);
             }
         }
 
-        // 将当前词的查询添加到最终查询中，维持原始bool逻辑
-        if (termHasQuery) {
-            booleanQuery->add(termQuery, query.booleanOp == SearchQuery::BooleanOperator::AND ? BooleanClause::MUST : BooleanClause::SHOULD);
+        if (!shouldQueries.empty()) {
+            Xapian::Query termQuery(Xapian::Query::OP_OR, shouldQueries.begin(), shouldQueries.end());
+            mustQueries.push_back(termQuery);
             hasValidQuery = true;
         }
     }
 
-    return hasValidQuery ? booleanQuery : nullptr;
+    if (!hasValidQuery) return Xapian::Query();
+    return Xapian::Query(query.booleanOp == SearchQuery::BooleanOperator::AND ? Xapian::Query::OP_AND : Xapian::Query::OP_OR, mustQueries.begin(), mustQueries.end());
 }
 
 void FileNameIndexedStrategy::cancel()

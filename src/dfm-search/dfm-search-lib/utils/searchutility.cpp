@@ -16,11 +16,9 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 
-#include <lucene++/LuceneHeaders.h>
-#include <lucene++/FSDirectory.h>
+#include <xapian.h>
 
 DFM_SEARCH_BEGIN_NS
-using namespace Lucene;
 
 namespace Global {
 
@@ -590,8 +588,11 @@ bool isPathInContentIndexDirectory(const QString &path)
 bool isContentIndexAvailable()
 {
     const QString &dir = contentIndexDirectory();
-    if (!IndexReader::indexExists(FSDirectory::open(dir.toStdWString())))
+    try {
+        Xapian::Database db(dir.toStdString());
+    } catch (...) {
         return false;
+    }
 
     const QString &statusFile = dir + "/index_status.json";
 
@@ -644,10 +645,12 @@ bool isFileNameIndexDirectoryAvailable()
 {
     try {
         const QString &indexDir = fileNameIndexDirectory();
-        bool exists = IndexReader::indexExists(FSDirectory::open(indexDir.toStdWString()));
-        return exists;
-    } catch (const LuceneException &e) {
-        qWarning() << "Failed to check index existence:" << QString::fromStdWString(e.getError());
+        Xapian::Database db(indexDir.toStdString());
+        return true;
+    } catch (const Xapian::Error &e) {
+        qWarning() << "Failed to check index existence:" << QString::fromStdString(e.get_msg());
+        return false;
+    } catch (...) {
         return false;
     }
 }

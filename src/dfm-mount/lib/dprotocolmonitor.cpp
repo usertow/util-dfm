@@ -333,7 +333,7 @@ static GUnixMountEntry* find_unix_mount_for(const gchar *path)
     g_autofree gchar *current_path = g_strdup(path);
 
     while (TRUE) {
-        found_mount = g_unix_mount_at(current_path, NULL);
+        found_mount = g_unix_mount_entry_at(current_path, NULL);
 
         if (found_mount)
             break;
@@ -357,7 +357,7 @@ bool DProtocolMonitorPrivate::isNativeMount(const QString &mpt)
     std::string s = mpt.toStdString();
     g_autoptr(GUnixMountEntry) entry = find_unix_mount_for(s.data());
     if (entry) {
-        QString devPath = g_unix_mount_get_device_path(entry);
+        QString devPath = g_unix_mount_entry_get_device_path(entry);
         if (devPath.startsWith("/dev/"))
             return true;
     }

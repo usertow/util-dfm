@@ -7,7 +7,7 @@
 #include <QString>
 #include <QStringList>
 
-#include <lucene++/LuceneHeaders.h>
+#include <xapian.h>
 
 #include <dfm-search/dsearch_global.h>
 
@@ -42,12 +42,12 @@ QString customHighlight(const QStringList &keywords, const QString &content, int
 /**
  * @brief 高亮搜索结果中的关键词
  * @param content 要高亮的内容
- * @param query Lucene查询对象
+ * @param query Xapian查询对象
  * @param maxLength 最大显示长度
  * @param enableHtml 是否启用HTML标签高亮，默认为false
  * @return 高亮后的内容
  */
-QString highlight(const QString &content, const Lucene::QueryPtr &query, int maxLength, bool enableHtml);
+QString highlight(const QString &content, const Xapian::Query &query, int maxLength, bool enableHtml);
 
 }   // namespace ContentHighlighter
 

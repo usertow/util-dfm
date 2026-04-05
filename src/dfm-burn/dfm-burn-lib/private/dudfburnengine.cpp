@@ -176,7 +176,9 @@ QStringList DUDFBurnEngine::readErrorsFromLog() const
         return {};
 
     QStringList ret;
-    logFile.open(QIODevice::ReadOnly | QIODevice::Text);
+    if (!logFile.open(QIODevice::ReadOnly | QIODevice::Text))
+        return {};
+
     while (!logFile.atEnd()) {
         QString &&line(logFile.readLine());
         if (line.startsWith("Warning") || line.startsWith("Error")) {

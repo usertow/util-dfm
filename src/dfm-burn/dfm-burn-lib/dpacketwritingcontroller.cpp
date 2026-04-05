@@ -92,7 +92,7 @@ QString DPacketWritingControllerPrivate::makeDiscRootPath()
     int error;
     QString path;
 
-    node_name = udfclient_realpath(curdir.name, "", &leaf_name);
+    node_name = udfclient_realpath(curdir.name, const_cast<char *> (""), &leaf_name);
 
     error = udfclient_lookup_pathname(NULL, &udf_node, node_name);
     if (error) {
@@ -226,7 +226,7 @@ bool DPacketWritingController::put(const QString &fileName)
     /* writeout file/dir tree and measure the time/speed */
     totalsize = 0;
     start = dptr->getmtime();
-    error = udfclient_put_subtree(curdir_node, ".", fileName.toLocal8Bit().data(), ".",
+    error = udfclient_put_subtree(curdir_node, const_cast<char *> ("."), fileName.toLocal8Bit().data(), const_cast<char *> ("."),
                                   fileName.toLocal8Bit().data(), &totalsize);
     if (error) {
         dptr->errorMsg = QString::fromLocal8Bit(strerror(error));
@@ -265,7 +265,7 @@ bool DPacketWritingController::mv(const QString &srcName, const QString &destNam
         return false;
     }
 
-    old_parent_name = udfclient_realpath(rename_from_name, "..", NULL);
+    old_parent_name = udfclient_realpath(rename_from_name, const_cast<char *> (".."), NULL);
     error = udfclient_lookup_pathname(NULL, &old_parent, old_parent_name);
     if (error || !old_parent) {
         dptr->errorMsg = "Can't determine rootdir of renamed file?";
@@ -280,7 +280,7 @@ bool DPacketWritingController::mv(const QString &srcName, const QString &destNam
     /* `to' gets substituted by its leaf name */
     rename_to_name = udfclient_realpath(curdir.name, to, &to);
     udfclient_lookup_pathname(NULL, &present, rename_to_name);
-    new_parent_name = udfclient_realpath(rename_to_name, "..", NULL);
+    new_parent_name = udfclient_realpath(rename_to_name, const_cast<char *> (".."), NULL);
     error = udfclient_lookup_pathname(NULL, &new_parent, new_parent_name);
     if (error || !new_parent) {
         dptr->errorMsg = "Can't determine rootdir of destination";
@@ -329,7 +329,7 @@ bool DPacketWritingController::rm(const QString &fileName)
         return false;
     }
 
-    full_parent_name = udfclient_realpath(target_name, "..", NULL);
+    full_parent_name = udfclient_realpath(target_name, const_cast<char *> (".."), NULL);
     error = udfclient_lookup_pathname(NULL, &parent_node, full_parent_name);
     if (error || !parent_node) {
         dptr->errorMsg = QString("rm %1 : parent lookup failed : %2").arg(target_name).arg(strerror(error));

@@ -349,7 +349,7 @@ void DBlockMonitorPrivate::onPropertyChanged(GDBusObjectManagerClient *mngClient
 
     QMap<Property, QVariant> changes;
     QVariant val = Utils::castFromGVariant(property);
-    if (val.type() == QVariant::Map) {
+    if (val.typeId() == QMetaType::QVariantMap) {
         QVariantMap vmap = val.toMap();
         for (auto iter = vmap.cbegin(); iter != vmap.cend(); ++iter) {
             auto key = iter.key();

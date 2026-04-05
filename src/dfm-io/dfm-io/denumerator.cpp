@@ -14,10 +14,13 @@
 #include <QVariant>
 #include <QPointer>
 #include <QtConcurrent>
+#include <QThreadPool>
 #include <QDebug>
 #include <qobjectdefs.h>
 
 #include <sys/stat.h>
+
+#include <gio/gio.h>
 
 #define FILE_DEFAULT_ATTRIBUTES "standard::*,etag::*,id::*,access::*,mountable::*,time::*,unix::*,dos::*,\
 owner::*,thumbnail::*,preview::*,filesystem::*,gvfs::*,selinux::*,trash::*,recent::*,metadata::*"
@@ -51,15 +54,19 @@ bool DEnumeratorPrivate::init(const QUrl &url)
         return createEnumerator(url, me);
     } else {
         mutex.lock();
-        bool succ = false;
-        QtConcurrent::run([this, me, url, &succ]() {
-            succ = createEnumerator(url, me);
+        auto succ = std::make_shared<bool>(false);
+        QThreadPool::globalInstance()->start([this, me, url, succ]() {
+            bool result = createEnumerator(url, me);
+            if (me) {
+                *succ = result;
+            }
         });
         bool wait = waitCondition.wait(&mutex, q->timeout());
+        bool finalSucc = *succ;
         mutex.unlock();
         if (!wait)
             qWarning() << "createEnumeratorInThread failed, url: " << url << " error: " << error.errorMsg();
-        return succ && wait;
+        return finalSucc && wait;
     }
 }
 

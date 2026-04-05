@@ -49,9 +49,9 @@ QString DFMUtils::devicePathFromUrl(const QUrl &url)
         return QString::fromLocal8Bit(uri);
     } else {
         g_autofree gchar *path = g_file_get_path(gfile);
-        g_autoptr(GUnixMountEntry) mount = g_unix_mount_for(path, nullptr);
+        g_autoptr(GUnixMountEntry) mount = g_unix_mount_entry_for(path, nullptr);
         if (mount) {
-            const gchar *devicePath = g_unix_mount_get_device_path(mount);
+            const gchar *devicePath = g_unix_mount_entry_get_device_path(mount);
             return QString::fromLocal8Bit(devicePath);
         }
     }
@@ -64,9 +64,9 @@ QString DFMUtils::deviceNameFromUrl(const QUrl &url)
         return QString();
 
     g_autoptr(GFile) gfile = DLocalHelper::createGFile(url);
-    g_autoptr(GUnixMountEntry) mount = g_unix_mount_for(g_file_peek_path(gfile), nullptr);
+    g_autoptr(GUnixMountEntry) mount = g_unix_mount_entry_for(g_file_peek_path(gfile), nullptr);
     if (mount)
-        return QString::fromLocal8Bit(g_unix_mount_get_device_path(mount));
+        return QString::fromLocal8Bit(g_unix_mount_entry_get_device_path(mount));
     return QString();
 }
 
@@ -79,9 +79,9 @@ QString DFMUtils::fsTypeFromUrl(const QUrl &url)
     g_autofree char *path = g_file_get_path(gfile);
     if (!path)
         return QString();
-    g_autoptr(GUnixMountEntry) mount = g_unix_mount_for(path, nullptr);
+    g_autoptr(GUnixMountEntry) mount = g_unix_mount_entry_for(path, nullptr);
     if (mount)
-        return QString::fromLocal8Bit(g_unix_mount_get_fs_type(mount));
+        return QString::fromLocal8Bit(g_unix_mount_entry_get_fs_type(mount));
     return QString();
 }
 
@@ -94,9 +94,9 @@ QString DFMUtils::mountPathFromUrl(const QUrl &url)
     g_autofree char *path = g_file_get_path(gfile);
     if (!path)
         return QString();
-    g_autoptr(GUnixMountEntry) mount = g_unix_mount_for(path, nullptr);
+    g_autoptr(GUnixMountEntry) mount = g_unix_mount_entry_for(path, nullptr);
     if (mount)
-        return QString::fromLocal8Bit(g_unix_mount_get_mount_path(mount));
+        return QString::fromLocal8Bit(g_unix_mount_entry_get_mount_path(mount));
     return QString();
 }
 
@@ -331,8 +331,8 @@ bool dfmio::DFMUtils::supportTrash(const QUrl &url)
     g_autofree char *path1 = g_file_get_path(gfile);
     if (!path1)
         return false;
-    g_autoptr(GUnixMountEntry) mount = g_unix_mount_for(path1, nullptr);
-    if (mount == nullptr || g_unix_mount_is_system_internal (mount))
+    g_autoptr(GUnixMountEntry) mount = g_unix_mount_entry_for(path1, nullptr);
+    if (mount == nullptr || g_unix_mount_entry_is_system_internal (mount))
         return false;
 
     return true;

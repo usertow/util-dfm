@@ -6,11 +6,7 @@
 
 #include "basestrategy.h"
 
-#include <lucene++/LuceneHeaders.h>
-#include <lucene++/QueryParser.h>
-#include <lucene++/BooleanQuery.h>
-#include <lucene++/QueryWrapperFilter.h>
-#include <lucene++/WildcardQuery.h>
+#include <xapian.h>
 
 // 前向声明
 class ContentSearcher;
@@ -38,30 +34,28 @@ private:
     // 执行内容搜索
     void performContentSearch(const SearchQuery &query);
 
-    // Build Lucene query
-    Lucene::QueryPtr buildLuceneQuery(const SearchQuery &query, const Lucene::AnalyzerPtr &analyzer, const QString &searchPath);
+    // Build Xapian query
+    Xapian::Query buildXapianQuery(const SearchQuery &query, const QString &searchPath);
     // Helper for simple queries (original logic for "contents" field)
-    Lucene::QueryPtr buildSimpleContentsQuery(
+    Xapian::Query buildSimpleContentsQuery(
             const SearchQuery &query,
-            const Lucene::QueryParserPtr &contentsParser);
+            Xapian::QueryParser &contentsParser);
 
     // Helper for "standard" boolean logic (original logic for "contents" field, handles AND/OR)
-    Lucene::QueryPtr buildStandardBooleanContentsQuery(
+    Xapian::Query buildStandardBooleanContentsQuery(
             const SearchQuery &query,
-            const Lucene::QueryParserPtr &contentsParser);
+            Xapian::QueryParser &contentsParser);
 
     // Helper for "advanced" mixed AND logic (searches "contents" and "filename")
-    Lucene::QueryPtr buildAdvancedAndQuery(
+    Xapian::Query buildAdvancedAndQuery(
             const SearchQuery &query,   // Operator is implicitly AND
-            const Lucene::QueryParserPtr &contentsParser,
-            const Lucene::AnalyzerPtr &analyzer);   // Analyzer is needed to create filenameParser
+            Xapian::QueryParser &contentsParser);
 
     // Process search results
-    void processSearchResults(const Lucene::IndexSearcherPtr &searcher,
-                              const Lucene::Collection<Lucene::ScoreDocPtr> &scoreDocs);
+    void processSearchResults(const Xapian::MSet &mset);
 
     QString m_indexDir;
-    Lucene::QueryPtr m_currentQuery;   // 存储当前查询
+    Xapian::Query m_currentQuery;   // 存储当前查询
     QStringList m_keywords;
 };
 

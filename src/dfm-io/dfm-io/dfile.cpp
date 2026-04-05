@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <QThreadPool>
+
 #include "private/dfile_p.h"
 #include "utils/dlocalhelper.h"
 
@@ -1157,8 +1159,10 @@ DFileFuture *DFile::openAsync(OpenFlags mode, int ioPriority, QObject *parent)
     DFileFuture *future = new DFileFuture(parent);
 
     QPointer<DFilePrivate> me = d.data();
-    QtConcurrent::run([&]() {
-        this->open(mode);
+    QThreadPool::globalInstance()->start([me, mode, future]() {
+        if (me) {
+            me->isOpen = me->doOpen(mode);
+        }
         if (!me)
             return;
         future->finished();
@@ -1173,8 +1177,13 @@ DFileFuture *DFile::closeAsync(int ioPriority, QObject *parent)
     DFileFuture *future = new DFileFuture(parent);
 
     QPointer<DFilePrivate> me = d.data();
-    QtConcurrent::run([&]() {
-        this->close();
+    QThreadPool::globalInstance()->start([me, future]() {
+        if (me) {
+            if (me->isOpen) {
+                if (me->doClose())
+                    me->isOpen = false;
+            }
+        }
         if (!me)
             return;
         future->finished();
@@ -1326,12 +1335,13 @@ DFileFuture *DFile::setPermissionsAsync(Permissions permission, int ioPriority, 
     const std::string &attributeKey = DLocalHelper::attributeStringById(DFileInfo::AttributeID::kUnixMode);
 
     QPointer<DFilePrivate> me = d.data();
-    QtConcurrent::run([&]() {
-        g_file_set_attribute_uint32(gfile, attributeKey.c_str(), stMode, G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, d->cancellable, &gerror);
+    QThreadPool::globalInstance()->start([me, gfile = std::move(gfile), attributeKey, stMode, future]() mutable {
+        g_autoptr(GError) gerror = nullptr;
+        g_file_set_attribute_uint32(gfile, attributeKey.c_str(), stMode, G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, me ? me->cancellable : nullptr, &gerror);
         if (!me)
             return;
         if (gerror)
-            d->setErrorFromGError(gerror);
+            me->setErrorFromGError(gerror);
         future->finished();
     });
     return future;

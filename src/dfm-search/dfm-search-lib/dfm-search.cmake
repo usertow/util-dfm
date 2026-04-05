@@ -2,15 +2,15 @@
 find_package(Qt${QT_VERSION_MAJOR} COMPONENTS Core REQUIRED)
 find_package(Dtk${DFM_VERSION_MAJOR} COMPONENTS Core REQUIRED)
 find_package(Threads REQUIRED)
-find_package(Boost REQUIRED)
+#find_package(Boost REQUIRED)
 
-if (Boost_VERSION_STRING VERSION_LESS "1.89.0")
-    message(STATUS "Boost < 1.89 → using Boost::system")
-    find_package(Boost REQUIRED COMPONENTS system)
-endif()
+#if (Boost_VERSION_STRING VERSION_LESS "1.89.0")
+#    message(STATUS "Boost < 1.89 → using Boost::system")
+#    find_package(Boost REQUIRED COMPONENTS system)
+#endif()
 
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(Lucene REQUIRED IMPORTED_TARGET liblucene++ liblucene++-contrib)
+pkg_check_modules(Xapian REQUIRED IMPORTED_TARGET xapian-core)
 
 # Build
 add_library(${BIN_NAME} SHARED
@@ -21,13 +21,13 @@ add_library(${BIN_NAME} SHARED
 target_link_libraries(${BIN_NAME} PUBLIC
     Qt${QT_VERSION_MAJOR}::Core
     Dtk${DFM_VERSION_MAJOR}::Core
-    PkgConfig::Lucene
+    PkgConfig::Xapian
     Threads::Threads
 )
 
-if (Boost_VERSION_STRING VERSION_LESS "1.89.0")
-    target_link_libraries(${BIN_NAME} PUBLIC Boost::system)
-endif()
+#if (Boost_VERSION_STRING VERSION_LESS "1.89.0")
+#    target_link_libraries(${BIN_NAME} PUBLIC Boost::system)
+#endif()
 
 target_include_directories(
     ${BIN_NAME}
@@ -78,7 +78,7 @@ install(DIRECTORY
 
 # for pc file config - update to include all dependencies
 set(PC_LIBS_PRIVATE Qt${QT_VERSION_MAJOR}Core dtk${DFM_VERSION_MAJOR}core)
-set(PC_REQ_PRIVATE liblucene++ liblucene++-contrib)
+set(PC_REQ_PRIVATE xapian-core)
 set(PC_REQ_PUBLIC Qt${QT_VERSION_MAJOR}Core dtk${DFM_VERSION_MAJOR}core)
 
 # config pkgconfig file

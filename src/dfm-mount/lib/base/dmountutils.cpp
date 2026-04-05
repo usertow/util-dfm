@@ -127,33 +127,33 @@ QVariant Utils::castFromGVariant(GVariant *val)
 
 GVariant *Utils::castFromQVariant(const QVariant &val)
 {
-    switch (val.type()) {
-    case QVariant::Bool:
+    switch (val.typeId()) {
+    case QMetaType::Bool:
         return g_variant_new("b", val.toBool());
-    case QVariant::Int:
+    case QMetaType::Int:
         return g_variant_new("i", val.toInt());
-    case QVariant::UInt:
+    case QMetaType::UInt:
         return g_variant_new("u", val.toUInt());
-    case QVariant::LongLong:
+    case QMetaType::LongLong:
         return g_variant_new("x", val.toLongLong());
-    case QVariant::ULongLong:
+    case QMetaType::ULongLong:
         return g_variant_new("t", val.toULongLong());
-    case QVariant::Double:
+    case QMetaType::Double:
         return g_variant_new("d", val.toDouble());
-    case QVariant::Char:
+    case QMetaType::Char:
         return g_variant_new("y", val.toChar().toLatin1());
-    case QVariant::String: {
+    case QMetaType::QString: {
         std::string str = val.toString().toStdString();
         const char *cstr = str.c_str();
         return g_variant_new("s", cstr);
     }
-    case QVariant::StringList:
+    case QMetaType::QStringList:
         return castFromQStringList(val.toStringList());
-    case QVariant::ByteArray:
+    case QMetaType::QByteArray:
         return g_variant_new_bytestring(val.toByteArray().data());
-    case QVariant::Map:
+    case QMetaType::QVariantMap:
         return castFromQVariantMap(val.toMap());
-    case QVariant::List:
+    case QMetaType::QVariantList:
         return castFromList(val.toList());
     default:
         return nullptr;
@@ -168,7 +168,7 @@ GVariant *Utils::castFromQVariantMap(const QVariantMap &val)
         return nullptr;
     }
 
-    for (auto iter = val.cbegin(); iter != val.cend(); iter += 1) {
+    for (auto iter = val.cbegin(); iter != val.cend(); ++iter) {
         GVariant *item = castFromQVariant(iter.value());
         std::string key = iter.key().toStdString();
         const char *ckey = key.c_str();

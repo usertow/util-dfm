@@ -33,6 +33,7 @@
 #include <stdio.h>
 #include <fcntl.h>
 #include <stdlib.h>
+#include <stddef.h>
 #include <errno.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -1823,19 +1824,19 @@ int udf_writeout_udf_node(struct udf_node *udf_node, char *why) {
                 fe   = &dscrptr->fe;
                 pos  = &fe->data[0] + udf_rw32(fe->l_ea);
                 rest = dscr_entry->len - sizeof(struct file_entry) - udf_rw32(fe->l_ea);
-                l_adptr = &fe->l_ad;
+                l_adptr = (uint32_t *)((uintptr_t)fe + offsetof(struct file_entry, l_ad));
                 break;
             case TAGID_EXTFENTRY      :
                 efe  = &dscrptr->efe;
                 pos  = &efe->data[0] + udf_rw32(efe->l_ea);
                 rest = dscr_entry->len - sizeof(struct extfile_entry) - udf_rw32(efe->l_ea);
-                l_adptr = &efe->l_ad;
+                l_adptr = (uint32_t *)((uintptr_t)efe + offsetof(struct extfile_entry, l_ad));
                 break;
             case TAGID_ALLOCEXTENT    :
                 aee  = &dscrptr->aee;
                 pos  = &aee->data[0];
                 rest = dscr_entry->len - sizeof(struct alloc_ext_entry);
-                l_adptr = &aee->l_ad;
+                l_adptr = (uint32_t *)((uintptr_t)aee + offsetof(struct alloc_ext_entry, l_ad));
                 break;
             case TAGID_INDIRECTENTRY :
                 /* do we even do these in strat 4 ? */
@@ -2953,8 +2954,8 @@ int udf_proc_logvol_integrity(struct udf_log_vol *udf_log_vol, struct logvol_int
     lb_size = udf_log_vol->lb_size;
 
     /* init start positions */
-    free_space_pos = &new_lvid->tables[0];
-    size_pos       = &new_lvid->tables[udf_log_vol->num_part_mappings];
+    free_space_pos = (uint32_t *)((uintptr_t)new_lvid + offsetof(struct logvol_int_desc, tables));
+    size_pos       = free_space_pos + udf_log_vol->num_part_mappings;
 
     /* init counters */
     udf_log_vol->total_space = udf_log_vol->free_space = udf_log_vol->await_alloc_space = 0;
@@ -4566,8 +4567,8 @@ int udf_writeout_LVID(struct udf_log_vol *udf_log_vol, int type) {
 
     /* calculate and fill in free space */
     intdesc->num_part = udf_rw32(udf_log_vol->num_part_mappings);
-    free_space_pos = &intdesc->tables[0];
-    size_pos       = &intdesc->tables[udf_log_vol->num_part_mappings];
+    free_space_pos = (uint32_t *)((uintptr_t)intdesc + offsetof(struct logvol_int_desc, tables));
+    size_pos       = free_space_pos + udf_log_vol->num_part_mappings;
     SLIST_FOREACH(part_mapping, &udf_log_vol->part_mappings, next_mapping) {
         part_num = part_mapping->udf_virt_part_num;
         udf_logvol_vpart_to_partition(udf_log_vol, part_num, NULL, &udf_partition);

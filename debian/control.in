@@ -16,7 +16,7 @@ Build-Depends:
  libisoburn-dev,
  libmediainfo-dev,
  libsecret-1-dev,
- liblucene++-dev,
+ libxapian-dev,
  libboost-filesystem-dev,
  libboost-system-dev
 Standards-Version: 4.3.0

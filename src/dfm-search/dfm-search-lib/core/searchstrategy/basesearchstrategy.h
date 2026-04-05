@@ -53,6 +53,28 @@ public:
      */
     virtual void cancel() = 0;
 
+    /**
+     * @brief 搜索取消守护类
+     */
+    class SearchCancellationGuard
+    {
+    public:
+        explicit SearchCancellationGuard(std::atomic<bool> *cancelled)
+            : m_cancelled(cancelled)
+        {
+            if (m_cancelled)
+                m_cancelled->store(false);
+        }
+        ~SearchCancellationGuard()
+        {
+            if (m_cancelled)
+                m_cancelled->store(false);
+        }
+
+    private:
+        std::atomic<bool> *m_cancelled;
+    };
+
 Q_SIGNALS:
     /**
      * @brief 找到搜索结果信号
