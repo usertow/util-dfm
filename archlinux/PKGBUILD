@@ -1,0 +1,23 @@
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+
+pkgname=deepin-util-dfm
+pkgver=1.2.32
+pkgrel=1
+pkgdesc='Utilities of deepin file manager'
+arch=('x86_64')
+license=('GPL-3.0-or-later')
+url="https://github.com/linuxdeepin/util-dfm"
+depends=('dtk6core' 'glib2' 'glibc' 'libgcc' 'libisoburn' 'libmediainfo' 'libsecret'
+         'libstdc++' 'lucene++' 'qt6-base' 'udisks2' 'util-linux-libs')
+makedepends=('xapian-core' 'git' 'cmake' 'ninja')
+source=("git+https://github.com/usertow/util-dfm.git")
+sha512sums=('SKIP')
+
+build() {
+  cmake -G Ninja -B build -S util-dfm -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_INSTALL_LIBEXECDIR=lib -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+  cmake --build build
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+}
